@@ -2,22 +2,16 @@ import * as React from "react";
 import { useQueryClient, type QueryStatus } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import {
-  managedAgentsQueryKey,
-  relayAgentsQueryKey,
-} from "@/features/agents/hooks";
 import { channelsQueryKey } from "@/features/channels/hooks";
 import {
   ensureStarterChannels,
   ensureWelcomeChannel,
   hasEnsuredWelcomeChannel,
-  markWelcomeChannelEnsured,
   notifyWelcomeChannelReady,
   rememberPendingWelcomeChannel,
 } from "@/features/onboarding/welcome";
 import { forceFreshOnboarding } from "@/features/onboarding/devFreshOnboarding";
-import { ensureWelcomeCanvas } from "@/features/onboarding/welcomeCanvas";
-import { ensureWelcomeTeam } from "@/features/onboarding/welcomeGuide";
+import { seedWelcomeExperience } from "@/features/onboarding/welcomeSeed";
 import { useProfileQuery } from "@/features/profile/hooks";
 import { useCommunities } from "@/features/communities/useCommunities";
 import { useIdentityQuery } from "@/shared/api/hooks";
@@ -41,35 +35,6 @@ const STARTER_CHANNEL_SETUP_TOAST_ID = "starter-channel-setup-error";
 export type ChannelInitResult =
   | { ok: true; focusChannelId?: string }
   | { ok: false; reason: string; focusChannelId?: string };
-
-const welcomeSeedPromises = new Map<string, Promise<void>>();
-
-function seedWelcomeExperience(
-  queryClient: ReturnType<typeof useQueryClient>,
-  channelId: string,
-  pubkey: string | null,
-  communityScope: string | null,
-) {
-  const key = `${communityScope ?? ""}:${channelId}`;
-  const current = welcomeSeedPromises.get(key);
-  if (current) return current;
-
-  const promise = (async () => {
-    try {
-      await ensureWelcomeTeam(channelId, communityScope);
-      await ensureWelcomeCanvas(channelId);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: managedAgentsQueryKey }),
-        queryClient.invalidateQueries({ queryKey: relayAgentsQueryKey }),
-      ]);
-      markWelcomeChannelEnsured(pubkey, communityScope);
-    } catch (error) {
-      console.warn("Failed to seed the private Welcome experience.", error);
-    }
-  })().finally(() => welcomeSeedPromises.delete(key));
-  welcomeSeedPromises.set(key, promise);
-  return promise;
-}
 
 export async function initializeStarterChannels(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -128,12 +93,11 @@ export async function initializeStarterChannels(
         ...channels.filter((channel) => !ensuredIds.has(channel.id)),
       ];
     });
-    void seedWelcomeExperience(
-      queryClient,
-      welcomeChannel.id,
-      pubkey,
+    void seedWelcomeExperience({
+      channelId: welcomeChannel.id,
       communityScope,
-    );
+      pubkey,
+    });
     await queryClient.invalidateQueries({ queryKey: channelsQueryKey });
     if (focus) {
       // Refreshing can briefly replace the optimistic cache with an older relay

@@ -15,6 +15,7 @@ import { expect, test } from "@playwright/test";
 
 import { installMockBridge, TEST_IDENTITIES } from "../helpers/bridge";
 import { waitForAnimations } from "../helpers/animations";
+import { FIZZ_PERSONA_SEED } from "../helpers/personas";
 
 const SHOTS = "test-results/restart-diff-screenshots";
 
@@ -74,7 +75,7 @@ const STANDALONE_AGENT = {
 const PERSONA_AGENT = {
   pubkey: TEST_IDENTITIES.bob.pubkey,
   name: "Persona Agent",
-  personaId: "builtin:fizz",
+  personaId: FIZZ_PERSONA_SEED.id,
   status: "running" as const,
   needsRestart: true,
   restartDiff: DIFF_ENTRIES,
@@ -254,7 +255,7 @@ test.describe("restart-diff screenshots", () => {
 
   test("02-grid-persona-restart-badge", async ({ page }) => {
     await installMockBridge(page, {
-      activePersonaIds: ["builtin:fizz"],
+      personas: [FIZZ_PERSONA_SEED],
       managedAgents: [PERSONA_AGENT],
     });
 

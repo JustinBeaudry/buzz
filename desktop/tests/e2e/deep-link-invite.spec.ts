@@ -301,8 +301,7 @@ test("deleted public starter channels do not strand community onboarding", async
     { relayWsUrl: COMMUNITY_RELAY_URL, skipOnboardingSeed: true },
   );
   await page.goto("/");
-
-  await page.getByRole("button", { name: "Take me to Buzz" }).click();
+  // The retired `team-intro` stage resumes as finalizing, which runs itself.
 
   await expect(page.getByTestId("community-onboarding-flow")).toHaveCount(0);
   await expect(page).toHaveURL(/#\/channels\/[^/]+$/);
@@ -356,14 +355,13 @@ test("required Welcome creation failure keeps community onboarding open", async 
     { relayWsUrl: COMMUNITY_RELAY_URL, skipOnboardingSeed: true },
   );
   await page.goto("/");
-
-  await page.getByRole("button", { name: "Take me to Buzz" }).click();
+  // The retired `team-intro` stage resumes as finalizing, which runs itself.
 
   await expect(page.getByTestId("community-onboarding-flow")).toBeVisible();
-  await expect(page.getByText(`${welcomeError} Try again.`)).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Take me to Buzz" }),
-  ).toBeEnabled();
+  await expect(page.getByTestId("community-finalizing-error")).toHaveText(
+    `${welcomeError} Try again.`,
+  );
+  await expect(page.getByTestId("community-finalizing-retry")).toBeEnabled();
   await expect(page.getByTestId("chat-title")).toHaveCount(0);
 });
 

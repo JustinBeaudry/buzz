@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Users } from "lucide-react";
 
 import {
+  COMMUNITY_STAGE_AFTER_PROFILE,
   markCommunityOnboardingComplete,
   useCommunityOnboarding,
 } from "@/features/onboarding/communityOnboarding";
@@ -23,9 +24,7 @@ import {
 } from "@/features/profile/ui/ProfileAvatarEditor";
 import { getProfile, updateProfile } from "@/shared/api/tauriProfiles";
 import { getIdentity, importIdentity } from "@/shared/api/tauriIdentity";
-import { listPersonas } from "@/shared/api/tauriPersonas";
 import { relayClient } from "@/shared/api/relayClient";
-import type { AgentPersona } from "@/shared/api/types";
 import { cn } from "@/shared/lib/cn";
 import { useSystemColorScheme } from "@/shared/theme/useSystemColorScheme";
 import { Button } from "@/shared/ui/button";
@@ -49,12 +48,6 @@ function isRelayMembershipDeniedError(error: unknown): boolean {
     error.message.includes("invalid: you are not a relay member")
   );
 }
-
-const STARTER_PERSONA_ANIMATIONS: Record<string, string> = {
-  Fizz: "/onboarding/starter-team/fizz.png",
-  Honey: "/onboarding/starter-team/honey.png",
-  Pollen: "/onboarding/starter-team/pollen.png",
-};
 
 /** Fade duration for the "entering" curtain over the mounting app. */
 const ENTERING_CURTAIN_FADE_MS = 500;
@@ -139,7 +132,7 @@ function LoadingDots({ label }: { label: string }) {
     <span
       aria-label={label}
       className="inline-flex items-center justify-center gap-1"
-      data-testid="community-team-intro-loading-dots"
+      data-testid="community-finalizing-loading-dots"
       role="status"
     >
       {[0, 1, 2].map((index) => (
@@ -182,9 +175,6 @@ export function CommunityOnboardingFlow({
   const [animatedPreviewCaption, setAnimatedPreviewCaption] = React.useState<
     string | null
   >(null);
-  const [starterPersonas, setStarterPersonas] = React.useState<AgentPersona[]>(
-    [],
-  );
   const [isPending, setIsPending] = React.useState(false);
   const checkedProfileTransactionRef = React.useRef<string | null>(null);
   const [starterChannelFailureCount, setStarterChannelFailureCount] =
@@ -202,28 +192,6 @@ export function CommunityOnboardingFlow({
   const animateEmojiAvatarChange = React.useCallback(() => {
     setAvatarSquishKey((key) => key + 1);
   }, []);
-
-  // Also fetch on "entering": the curtain is a fresh mount of this component,
-  // so the team-intro fetch from the pre-curtain instance isn't in this state.
-  const isTeamIntroVisible =
-    transaction?.stage === "team-intro" ||
-    transaction?.stage === "finalizing" ||
-    transaction?.stage === "entering";
-  React.useEffect(() => {
-    if (!isTeamIntroVisible) return;
-    void listPersonas()
-      .then((personas) =>
-        setStarterPersonas(
-          ["Fizz", "Honey", "Pollen"].flatMap((name) => {
-            const persona = personas.find(
-              (candidate) => candidate.displayName === name,
-            );
-            return persona ? [persona] : [];
-          }),
-        ),
-      )
-      .catch(() => setStarterPersonas([]));
-  }, [isTeamIntroVisible]);
 
   useClaimInvite();
 
@@ -306,8 +274,23 @@ export function CommunityOnboardingFlow({
     }
   }, [finish, isPending, queryClient, relayUrl, update]);
 
+  // Finalizing starts on its own once the profile is saved, and also resumes
+  // a transaction persisted mid-finalize (including the retired `team-intro`
+  // stage, which loads as finalizing). It runs once per arrival; after a
+  // failure the user retries explicitly.
+  const autoFinalizedTransactionRef = React.useRef<string | null>(null);
+  const transactionId = transaction?.id;
+  const isFinalizingStage = transaction?.stage === "finalizing";
+  React.useEffect(() => {
+    if (!isFinalizingStage || !transactionId || isPending) return;
+    if (autoFinalizedTransactionRef.current === transactionId) return;
+    autoFinalizedTransactionRef.current = transactionId;
+    void finalize();
+  }, [finalize, isFinalizingStage, isPending, transactionId]);
+
   const backToProfile = React.useCallback(() => {
     if (isPending) return;
+    autoFinalizedTransactionRef.current = null;
     setStarterChannelFailureCount(0);
     setTransitionDirection("backward");
     update({ stage: "profile", error: undefined });
@@ -323,7 +306,10 @@ export function CommunityOnboardingFlow({
       .then((profile) => {
         if (profile.hasProfileEvent) {
           setTransitionDirection("forward");
-          update({ stage: "team-intro", error: undefined }, transaction.id);
+          update(
+            { stage: COMMUNITY_STAGE_AFTER_PROFILE, error: undefined },
+            transaction.id,
+          );
         }
       })
       .catch(() => {
@@ -331,10 +317,7 @@ export function CommunityOnboardingFlow({
         // existing path when the relay cannot answer the lookup.
       });
   }, [isProfileStage, transaction, update]);
-  const isTeamStage =
-    transaction?.stage === "team-intro" ||
-    transaction?.stage === "finalizing" ||
-    transaction?.stage === "entering";
+  const isSetupStage = isFinalizingStage || transaction?.stage === "entering";
 
   // Seed display name and avatar from the relay profile when the profile step
   // is shown. This covers the case where the skip raced or was bypassed (e.g.,
@@ -459,7 +442,7 @@ export function CommunityOnboardingFlow({
         throw error;
       }
       setTransitionDirection("forward");
-      update({ stage: "team-intro", error: undefined });
+      update({ stage: COMMUNITY_STAGE_AFTER_PROFILE, error: undefined });
     } catch (error) {
       if (isRelayMembershipDeniedError(error)) {
         try {
@@ -490,7 +473,6 @@ export function CommunityOnboardingFlow({
       }
     >
       <OnboardingCard
-        allowWideContent={isTeamStage}
         backAction={
           isProfileStage
             ? {
@@ -498,29 +480,29 @@ export function CommunityOnboardingFlow({
                 onClick: onCancel,
                 testId: "community-profile-back",
               }
-            : isTeamStage
+            : isSetupStage
               ? {
                   disabled: isPending || transaction.stage === "entering",
                   onClick: backToProfile,
-                  testId: "community-team-intro-back",
+                  testId: "community-finalizing-back",
                 }
               : undefined
         }
-        current={isTeamStage ? 7 : isProfileStage ? 6 : 5}
+        current={isSetupStage ? 7 : isProfileStage ? 6 : 5}
         systemColorScheme={systemColorScheme}
         testId="community-onboarding-flow"
       >
         <OnboardingSlideTransition
           direction={transitionDirection}
-          transitionKey={`community-${isProfileStage ? "profile" : isTeamStage ? "team" : transaction.stage}-${transitionDirection}`}
+          transitionKey={`community-${isProfileStage ? "profile" : isSetupStage ? "setup" : transaction.stage}-${transitionDirection}`}
         >
           <div
             className={cn(
               "relative mx-auto w-full text-center",
               isProfileStage
                 ? "flex max-w-[500px] flex-col items-center"
-                : isTeamStage
-                  ? "flex max-w-[760px] flex-col items-center"
+                : isSetupStage
+                  ? "flex max-w-[500px] flex-col items-center"
                   : "flex min-h-full max-w-[560px] flex-col justify-center",
             )}
             data-testid="community-onboarding-body"
@@ -750,77 +732,47 @@ export function CommunityOnboardingFlow({
             ) : (
               <>
                 <h1 className="text-title font-normal">
-                  Meet your starter team
+                  Setting up {transaction.communityName}
                 </h1>
                 <p className="mx-auto mt-3 max-w-[400px] text-sm leading-6 text-foreground/80">
-                  Buzz lets you bring multiple agents into the same workspace.
-                  Your team will help you get started using Buzz.
+                  Preparing your private Welcome channel.
                 </p>
                 <div className="flex w-full flex-1 items-center justify-center py-6">
-                  {starterPersonas.length > 0 ? (
-                    <div className="grid w-full grid-cols-3 gap-6">
-                      {starterPersonas.map((persona) => {
-                        const animationUrl =
-                          STARTER_PERSONA_ANIMATIONS[persona.displayName];
-                        return (
-                          <div
-                            className="flex min-w-0 flex-col items-center gap-2"
-                            key={persona.id}
-                          >
-                            {animationUrl ? (
-                              <img
-                                alt={`${persona.displayName} animated character`}
-                                className="size-24 object-contain"
-                                data-testid={`starter-persona-${persona.displayName.toLowerCase()}`}
-                                src={animationUrl}
-                              />
-                            ) : (
-                              <ProfileAvatar
-                                avatarUrl={persona.avatarUrl}
-                                className="size-24 text-3xl"
-                                label={persona.displayName}
-                              />
-                            )}
-                            <span className="font-mono text-xs font-medium uppercase tracking-[0.15em]">
-                              {persona.displayName}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
+                  {transaction.error ? (
+                    <p
+                      className="text-sm text-destructive"
+                      data-testid="community-finalizing-error"
+                    >
+                      {transaction.error}
+                      {starterChannelFailureCount === 1 ? " Try again." : null}
+                    </p>
+                  ) : (
+                    <LoadingDots label="Preparing Welcome" />
+                  )}
                 </div>
                 {transaction.error ? (
-                  <p className="text-sm text-destructive">
-                    {transaction.error}
-                    {starterChannelFailureCount === 1 ? " Try again." : null}
-                  </p>
-                ) : null}
-                <OnboardingFooter>
-                  <Button
-                    className={ONBOARDING_PRIMARY_CTA_CLASS}
-                    data-testid="community-team-intro-enter"
-                    disabled={isPending || transaction.stage === "entering"}
-                    onClick={() => void finalize()}
-                  >
-                    {isPending || transaction.stage === "entering" ? (
-                      <LoadingDots label="Preparing Welcome" />
-                    ) : (
-                      "Take me to Buzz"
-                    )}
-                  </Button>
-                  {starterChannelFailureCount >= 2 ? (
+                  <OnboardingFooter>
                     <Button
-                      className="h-9 rounded-full px-5 hover:bg-foreground/10"
-                      data-testid="community-team-intro-skip"
-                      disabled={isPending || transaction.stage === "entering"}
-                      onClick={() => void finish()}
-                      variant="ghost"
+                      className={ONBOARDING_PRIMARY_CTA_CLASS}
+                      data-testid="community-finalizing-retry"
+                      disabled={isPending}
+                      onClick={() => void finalize()}
                     >
-                      Skip for now
+                      Try again
                     </Button>
-                  ) : null}
-                </OnboardingFooter>
+                    {starterChannelFailureCount >= 2 ? (
+                      <Button
+                        className="h-9 rounded-full px-5 hover:bg-foreground/10"
+                        data-testid="community-finalizing-skip"
+                        disabled={isPending}
+                        onClick={() => void finish()}
+                        variant="ghost"
+                      >
+                        Skip for now
+                      </Button>
+                    ) : null}
+                  </OnboardingFooter>
+                ) : null}
               </>
             )}
           </div>

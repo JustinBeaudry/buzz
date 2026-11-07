@@ -2,7 +2,7 @@ import { getCanvas, setCanvas } from "@/shared/api/tauri";
 
 export const WELCOME_CANVAS_CONTENT = `# Welcome to Buzz
 
-This private channel is your home base for getting oriented. Fizz, Honey, and Pollen can help you learn the app, troubleshoot setup, and work through something you are building.
+This private channel is your home base for getting oriented. Add agents from the Agents page when you want help learning the app, troubleshooting setup, or working through something you are building.
 
 ## Work with your agents
 
@@ -12,14 +12,14 @@ This private channel is your home base for getting oriented. Fizz, Honey, and Po
 
 ## Try something
 
-Bring the team something you are building, or give them a quick challenge to see how they work together.
+Bring an agent something you are building, or give it a quick challenge to see how it works.
 
 ## Get help
 
-Ask the team a question here, or read the [Buzz user guide](https://github.com/block/buzz#readme).
+Ask an agent a question here, or read the [Buzz user guide](https://github.com/block/buzz#readme).
 `;
 
-type WelcomeCanvasClient = {
+export type WelcomeCanvasClient = {
   getCanvas: typeof getCanvas;
   setCanvas: typeof setCanvas;
 };

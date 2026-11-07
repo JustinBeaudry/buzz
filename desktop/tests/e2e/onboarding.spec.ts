@@ -9,11 +9,7 @@ import {
   TEST_IDENTITIES,
 } from "../helpers/bridge";
 import { expectEmojiMartStylesInstalled } from "../helpers/css";
-import {
-  invokeMockCommand,
-  publishWelcomeTeamPresence,
-  waitForWelcomeTeam,
-} from "../helpers/welcomeTeam";
+import { invokeMockCommand } from "../helpers/mockCommands";
 import { installFakeCamera } from "../helpers/fakeCamera";
 import {
   E2E_IDENTITY_OVERRIDE_STORAGE_KEY,
@@ -89,6 +85,12 @@ const BLANK_AVATAR_EMOJI_IDENTITY = {
 const FIRST_RUN_ALICE = {
   ...TEST_IDENTITIES.alice,
   username: "",
+};
+/** A user's own agent, not a Welcome member, used to complete the banner. */
+const WELCOME_MENTION_AGENT = {
+  pubkey: "5c".repeat(32),
+  name: "Scout",
+  status: "running" as const,
 };
 
 async function seedOnboardingCompletion(page: Page, pubkey: string) {
@@ -208,10 +210,8 @@ async function expectIntroActionIconStackedAboveTitle(
 
 async function expectWelcomeComposerBannerLayout(page: Page) {
   const banner = page.getByTestId("welcome-composer-guide-banner");
-  const personaMention = page.getByTestId("welcome-composer-persona-mention");
   const composer = page.getByTestId("message-composer");
   const bannerBox = await banner.boundingBox();
-  const personaMentionBox = await personaMention.boundingBox();
   const composerBox = await composer.boundingBox();
   const dockBackdropBox = await page
     .getByTestId("composer-dock-backdrop")
@@ -226,7 +226,6 @@ async function expectWelcomeComposerBannerLayout(page: Page) {
 
   if (
     !bannerBox ||
-    !personaMentionBox ||
     !composerBox ||
     !dockBackdropBox ||
     !guidanceLayerBox ||
@@ -303,72 +302,6 @@ async function expectWelcomeComposerBannerLayout(page: Page) {
   expect(radii.transform).toBe("none");
   expect(radii.willChange).toBe("auto");
   expect(radii.zIndex).toBe("1");
-  expect(personaMentionBox.width).toBeGreaterThan(0);
-}
-
-async function expectWelcomePersonaMention(page: Page) {
-  const banner = page.getByTestId("welcome-composer-guide-banner");
-  const personaMention = page.getByTestId("welcome-composer-persona-mention");
-  await expect(personaMention).toBeVisible();
-  await expect(personaMention).toHaveAttribute("data-persona-options", "Fizz");
-  await expect(personaMention).toHaveAttribute("data-active-persona", "Fizz");
-  await expect(personaMention).toHaveAttribute(
-    "data-animation-target",
-    "per-character",
-  );
-
-  const activePersona = await personaMention.getAttribute(
-    "data-active-persona",
-  );
-  expect(activePersona).not.toBeNull();
-  await expect(personaMention).toContainText(`@${activePersona}`);
-  expect(
-    await personaMention
-      .getByTestId("welcome-composer-persona-character")
-      .count(),
-  ).toBeGreaterThanOrEqual(4);
-  expect(
-    await personaMention
-      .getByTestId("welcome-composer-persona-character")
-      .first()
-      .evaluate((element) => window.getComputedStyle(element).filter),
-  ).toBe("none");
-
-  const transition = await personaMention.evaluate((element) => {
-    const styles = window.getComputedStyle(element);
-    const durationMs = Number(
-      element.getAttribute("data-width-animation-duration-ms"),
-    );
-    return {
-      duration: styles.transitionDuration,
-      durationMs,
-      property: styles.transitionProperty,
-    };
-  });
-  expect(transition.durationMs).toBeGreaterThanOrEqual(700);
-  expect(transition.durationMs).toBeLessThanOrEqual(740);
-  expect(Math.round(Number.parseFloat(transition.duration) * 1000)).toBe(
-    transition.durationMs,
-  );
-  expect(transition.property).toContain("width");
-
-  const alignment = await personaMention.evaluate((element) => {
-    const mentionStyles = window.getComputedStyle(element);
-    const bannerStyles = window.getComputedStyle(
-      element.closest('[data-testid="welcome-composer-guide-banner"]') ??
-        element,
-    );
-    return {
-      display: mentionStyles.display,
-      lineHeightMatchesBanner:
-        mentionStyles.lineHeight === bannerStyles.lineHeight,
-      verticalAlign: mentionStyles.verticalAlign,
-    };
-  });
-  expect(alignment.display).toBe("inline-block");
-  expect(alignment.verticalAlign).toBe("baseline");
-  expect(alignment.lineHeightMatchesBanner).toBe(true);
-  await expect(banner).toContainText("Mention");
 }
 
 async function expectPrivateWelcomeLanding(page: Page) {
@@ -436,22 +369,22 @@ async function expectWelcomeView(page: Page) {
     "Create an agent",
   );
   await expect(page.getByTestId("message-composer")).toBeVisible();
-  // Measure the empty-channel intro before presence releases the live kickoff.
-  // Its message arrival can remount the timeline while bounding boxes are read.
-  await publishWelcomeTeamPresence(page);
   await expect(page.getByTestId("welcome-composer-guide-banner")).toBeVisible();
   await expect(page.getByTestId("welcome-composer-guide-banner")).toContainText(
-    "Mention",
+    "Mention an agent",
   );
   await expect(page.getByTestId("welcome-composer-guide-banner")).toContainText(
     "whenever you want their help.",
   );
-  await expectWelcomePersonaMention(page);
+  await expect(
+    page.getByTestId("welcome-composer-persona-mention"),
+  ).toHaveCount(0);
   await expectWelcomeComposerBannerLayout(page);
 }
 
-async function expectWelcomeComposerBannerCompletesAfterPersonaMention(
+async function expectWelcomeComposerBannerCompletesAfterAgentMention(
   page: Page,
+  agent: { name: string; pubkey: string },
 ) {
   const banner = page.getByTestId("welcome-composer-guide-banner");
   const channelIntro = page.getByTestId("message-channel-intro");
@@ -461,10 +394,8 @@ async function expectWelcomeComposerBannerCompletesAfterPersonaMention(
     throw new Error("Could not measure the Welcome composer");
   }
 
-  // The fixture has a seeded Fizz and this new member's starter Fizz. A
-  // manually typed name cannot choose between them or complete onboarding.
   const input = page.getByTestId("message-input");
-  const content = "Thanks @Fizz";
+  const content = `Thanks @${agent.name}`;
   const sentRecipients = () =>
     page.evaluate(
       (content) =>
@@ -475,34 +406,13 @@ async function expectWelcomeComposerBannerCompletesAfterPersonaMention(
           ),
       content,
     );
-  await input.fill(content);
-  await input.press("Escape");
-  await page.getByTestId("send-message").click();
-  await expect(
-    page.getByText("The mention @Fizz is ambiguous.", { exact: false }),
-  ).toBeVisible();
-  await expect(input).toHaveText(content);
+  // Welcome starts with no agents, so the user brings their own: a managed
+  // agent outside the channel is added on send, like in any other channel.
   await expect(banner).toHaveAttribute("data-state", "prompt");
-  expect(await sentRecipients()).toEqual([]);
-
-  const agents = await invokeMockCommand<
-    Array<{ pubkey: string; persona_id: string | null; status: string }>
-  >(page, "list_managed_agents");
-  const sameNameAgents = agents.filter(
-    (agent) => agent.persona_id === "builtin:fizz",
-  );
-  expect(sameNameAgents).toHaveLength(2);
-  // Onboarding starts the new member's starter; the pre-existing mock stays
-  // stopped. This identifies the fixture key, not a production routing rule.
-  const fizz = sameNameAgents.filter((agent) => agent.status === "running");
-  expect(fizz).toHaveLength(1);
-  // Make selection intent explicit; do not remove the colliding fixture or
-  // relax extraction. The resulting event must tag only our starter identity.
-  await input.fill("");
   await input.fill(content);
-  await page.getByTestId(`mention-suggestion-${fizz[0].pubkey}`).click();
+  await page.getByTestId(`mention-suggestion-${agent.pubkey}`).click();
   await page.getByTestId("send-message").click();
-  await expect.poll(sentRecipients).toEqual([[fizz[0].pubkey]]);
+  await expect.poll(sentRecipients).toEqual([[agent.pubkey]]);
 
   await expect(banner).toHaveAttribute("data-state", "complete");
   await expect(banner).toHaveAttribute("data-tone", "success");
@@ -634,7 +544,8 @@ async function expectStarterChannels(page: Page) {
     ]);
 }
 
-async function expectWelcomeGuideIntro(
+/** Onboarding seeds the Welcome channel and canvas, never starter agents. */
+async function expectWelcomeWithoutStarterAgents(
   page: Page,
   { expectVisible = true }: { expectVisible?: boolean } = {},
 ) {
@@ -645,41 +556,13 @@ async function expectWelcomeGuideIntro(
         return null;
       }
 
-      const [members, agents] = await Promise.all([
-        invokeMockCommand<{
-          members: Array<{ pubkey: string; role: string; is_agent: boolean }>;
-        }>(page, "get_channel_members", { channelId }),
-        invokeMockCommand<
-          Array<{ pubkey: string; name: string; persona_id: string | null }>
-        >(page, "list_managed_agents"),
-      ]);
-      const fizz = agents.find(
-        (agent) => agent.name === "Fizz" && agent.persona_id === "builtin:fizz",
-      );
-      const fizzMember = fizz
-        ? members.members.find((member) => member.pubkey === fizz.pubkey)
-        : null;
-      const profileAvatarUrl = fizz
-        ? (
-            await invokeMockCommand<{
-              profiles: Record<string, { avatar_url: string | null }>;
-            }>(page, "get_users_batch", {
-              pubkeys: [fizz.pubkey],
-            })
-          ).profiles[fizz.pubkey]?.avatar_url
-        : null;
-
-      return {
-        fizzIsBot: fizzMember?.role === "bot" && fizzMember.is_agent,
-        fizzPersonaId: fizz?.persona_id ?? null,
-        profileAvatarUrl,
-      };
+      const { members } = await invokeMockCommand<{
+        members: Array<{ pubkey: string; is_agent: boolean }>;
+      }>(page, "get_channel_members", { channelId });
+      return members.filter((member) => member.is_agent).length;
     })
-    .toEqual({
-      fizzIsBot: true,
-      fizzPersonaId: "builtin:fizz",
-      profileAvatarUrl: null,
-    });
+    .toBe(0);
+  expect(await commandCount(page, "create_managed_agent")).toBe(0);
 
   if (expectVisible) {
     await expect(page.getByTestId("message-channel-intro")).toBeVisible();
@@ -2140,26 +2023,13 @@ test("community onboarding reuses an existing relay profile", async ({
       ),
     )
     .toBeGreaterThan(0);
-  await expect(
-    page.getByRole("heading", { name: "Meet your starter team" }),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByTestId("community-onboarding-flow")
-      .locator(".buzz-onboarding-transition-line"),
-  ).toHaveAttribute("data-onboarding-direction", "forward");
-  await expect(
-    page.getByRole("heading", { name: "Build your profile" }),
-  ).toHaveCount(0);
-  await page.getByTestId("community-team-intro-back").click();
-  await expect(
-    page.getByRole("heading", { name: "Build your profile" }),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByTestId("community-onboarding-flow")
-      .locator(".buzz-onboarding-transition-line"),
-  ).toHaveAttribute("data-onboarding-direction", "backward");
+  // With no starter team to introduce, a reused profile finalizes straight
+  // into the app instead of stopping on another onboarding screen.
+  await expect(page.getByTestId("community-onboarding-flow")).toHaveCount(0, {
+    timeout: 10_000,
+  });
+  await expectPrivateWelcomeLanding(page);
+  expect(await commandCount(page, "update_profile")).toBe(0);
 });
 
 test("first-community direct join cancel returns to request access", async ({
@@ -2945,7 +2815,6 @@ test("a pending avatar never becomes durable if propagation fails after onboardi
     page.getByTestId("community-avatar-circle-upload-pending"),
   ).toBeVisible();
   await page.getByTestId("community-profile-next").click();
-  await page.getByTestId("community-team-intro-enter").click();
   await expect(page.getByTestId("community-onboarding-flow")).toHaveCount(0, {
     timeout: 10_000,
   });
@@ -3014,7 +2883,6 @@ test("a pending avatar becomes durable after onboarding unmounts once ready", as
   await page.getByTestId("community-profile-name-key").fill("Tyler");
   await uploadCommunityAvatar(page, "ready-after-unmount-community-avatar.png");
   await page.getByTestId("community-profile-next").click();
-  await page.getByTestId("community-team-intro-enter").click();
   await expect(page.getByTestId("community-onboarding-flow")).toHaveCount(0, {
     timeout: 10_000,
   });
@@ -3543,7 +3411,7 @@ test("first-run onboarding keeps the shell hidden and lands on private Welcome a
   await expect(page.getByTestId("onboarding-gate")).toHaveCount(0);
   await expectWelcomeView(page);
   await expectStarterChannels(page);
-  await expectWelcomeGuideIntro(page);
+  await expectWelcomeWithoutStarterAgents(page);
 });
 
 async function commandCount(page: Page, command: string) {
@@ -3577,75 +3445,6 @@ test("failed public starter channel setup does not show a retry toast", async ({
       .filter({ hasText: "Couldn't set up starter channels" }),
   ).toHaveCount(0);
   expect(await commandCount(page, "ensure_starter_channels")).toBe(2);
-});
-
-test("first-run onboarding posts the live Fizz kickoff", async ({ page }) => {
-  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
-  await installMockBridge(
-    page,
-    {
-      globalAgentConfig: {
-        env_vars: { OPENAI_API_KEY: "e2e-placeholder" },
-        provider: "openai",
-        model: "gpt-5.5",
-      },
-    },
-    { skipOnboardingSeed: true },
-  );
-  await page.goto("/");
-
-  await page.getByTestId("onboarding-display-name").fill("Morty QA");
-  await completeProfileOnboarding(page);
-
-  await expectPrivateWelcomeLanding(page);
-  // Runtime start alone cannot satisfy the kickoff's relay-presence wait.
-  const team = await waitForWelcomeTeam(page);
-  const presence = await invokeMockCommand<Record<string, string>>(
-    page,
-    "get_presence",
-    { pubkeys: team.map((agent) => agent.pubkey) },
-  );
-  expect(team.map((agent) => presence[agent.pubkey])).toEqual([
-    "offline",
-    "offline",
-    "offline",
-  ]);
-  await expect(page.getByTestId("message-timeline")).not.toContainText(
-    "Hi Morty QA, I'm Fizz. Welcome to Buzz.",
-  );
-  await publishWelcomeTeamPresence(page);
-  // Greeted by the name typed above — the @mention pill also files the opener
-  // into the new user's Inbox mentions feed.
-  await expect(page.getByTestId("message-timeline")).toContainText(
-    "Hi Morty QA, I'm Fizz. Welcome to Buzz.",
-  );
-  await expect(page.getByTestId("message-timeline")).toContainText(
-    "Honey and Pollen, introduce yourselves",
-  );
-});
-
-test("first-run onboarding lands before Welcome team bootstrap completes", async ({
-  page,
-}) => {
-  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
-  await installMockBridge(
-    page,
-    { createManagedAgentDelayMs: 1_000 },
-    { skipOnboardingSeed: true },
-  );
-  await page.goto("/");
-
-  await page.getByTestId("onboarding-display-name").fill("Morty QA");
-  await completeProfileOnboarding(page);
-
-  await expectPrivateWelcomeLanding(page);
-  await expect(page.getByTestId("app-loading-gate")).toHaveCount(0);
-  await publishWelcomeTeamPresence(page);
-  await expect(page.getByTestId("message-timeline")).toContainText(
-    "Hi Morty QA, I'm Fizz. Welcome to Buzz.",
-  );
-  await page.waitForTimeout(1_500);
-  expect(await commandCount(page, "create_managed_agent")).toBe(3);
 });
 
 test("existing relay profile with display name auto-skips onboarding without localStorage", async ({
@@ -3702,14 +3501,18 @@ test("completed onboarding backfills missing starter channels", async ({
   await expect(page.getByTestId("channel-general")).toBeVisible();
   await expect(page.getByTestId("channel-welcome-everyone")).toBeVisible();
   await expectStarterChannels(page);
-  await expectWelcomeGuideIntro(page, { expectVisible: false });
+  await expectWelcomeWithoutStarterAgents(page, { expectVisible: false });
 });
 
 test("finishing onboarding creates starter channels and focuses welcome-everyone for a new member", async ({
   page,
 }) => {
   await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
-  await installMockBridge(page, undefined, { skipOnboardingSeed: true });
+  await installMockBridge(
+    page,
+    { managedAgents: [WELCOME_MENTION_AGENT] },
+    { skipOnboardingSeed: true },
+  );
   await page.goto("/");
 
   await page.getByTestId("onboarding-display-name").fill("Morty QA");
@@ -3718,8 +3521,11 @@ test("finishing onboarding creates starter channels and focuses welcome-everyone
   await expectWelcomeView(page);
   await expect(page.getByTestId("channel-general")).toBeVisible();
   await expectStarterChannels(page);
-  await expectWelcomeGuideIntro(page);
-  await expectWelcomeComposerBannerCompletesAfterPersonaMention(page);
+  await expectWelcomeWithoutStarterAgents(page);
+  await expectWelcomeComposerBannerCompletesAfterAgentMention(
+    page,
+    WELCOME_MENTION_AGENT,
+  );
 });
 
 test("welcome-everywhere banner: X dismiss removes the guidance surface", async ({
@@ -3731,7 +3537,6 @@ test("welcome-everywhere banner: X dismiss removes the guidance surface", async 
 
   await page.getByTestId("onboarding-display-name").fill("Morty QA");
   await completeProfileOnboarding(page);
-  await publishWelcomeTeamPresence(page);
 
   const banner = page.getByTestId("welcome-composer-guide-banner");
   const guidanceLayer = page.getByTestId("welcome-composer-guidance-layer");
@@ -3758,7 +3563,6 @@ test("welcome-everywhere banner: dismiss persists after channel re-entry", async
 
   await page.getByTestId("onboarding-display-name").fill("Morty QA");
   await completeProfileOnboarding(page);
-  await publishWelcomeTeamPresence(page);
 
   const banner = page.getByTestId("welcome-composer-guide-banner");
 

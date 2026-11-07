@@ -65,7 +65,7 @@ export function AgentIdentityFields({
             disabled={disabled}
             id="persona-display-name"
             onChange={(event) => onDisplayNameChange(event.target.value)}
-            placeholder="Fizz"
+            placeholder="Researcher"
             value={displayName}
           />
         </div>

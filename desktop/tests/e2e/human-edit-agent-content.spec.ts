@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { installMockBridge } from "../helpers/bridge";
+import { FIZZ_PERSONA_SEED } from "../helpers/personas";
 
 // Fixed pubkey for the owned managed agent seeded in these tests.
 // Must not collide with any existing e2eBridge constant.
@@ -60,6 +61,7 @@ async function openMoreActionsMenu(
 
 test.beforeEach(async ({ page }) => {
   await installMockBridge(page, {
+    personas: [{ ...FIZZ_PERSONA_SEED, isActive: false }],
     managedAgents: [
       {
         // OwnedBot: a managed agent owned by the mock identity.
@@ -67,7 +69,7 @@ test.beforeEach(async ({ page }) => {
         // in mockProfiles when a managed agent is seeded.
         pubkey: OWNED_AGENT_PUBKEY,
         name: "OwnedBot",
-        personaId: "builtin:fizz",
+        personaId: FIZZ_PERSONA_SEED.id,
         status: "running",
         // Seed into #agents so the bridge seeds a message from this agent.
         channelNames: ["agents"],

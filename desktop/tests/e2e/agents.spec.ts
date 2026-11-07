@@ -9,6 +9,13 @@ import { emojiAvatarDataUrl } from "@/features/profile/ui/ProfileAvatarEditor.ut
 import { waitForAnimations } from "../helpers/animations";
 import { installMockBridge, TEST_IDENTITIES } from "../helpers/bridge";
 import { seedActiveIdentity } from "../helpers/onboarding";
+import { FIZZ_PERSONA_SEED } from "../helpers/personas";
+
+const HONEY_PERSONA_SEED = {
+  id: "persona-honey",
+  displayName: "Honey",
+  systemPrompt: "You are Honey.",
+};
 
 function createCatalogEvent(input: {
   eventId?: string;
@@ -230,12 +237,20 @@ async function countCommandInvocations(
   );
 }
 
-test("catalog hides built-ins and shows the shared-agent empty state", async ({
+test("catalog hides unshared local agents and shows the shared-agent empty state", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 420 });
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz", "builtin:honey", "builtin:bumble"],
+    personas: [
+      FIZZ_PERSONA_SEED,
+      HONEY_PERSONA_SEED,
+      {
+        id: "persona-pollen",
+        displayName: "Pollen",
+        systemPrompt: "You are Pollen.",
+      },
+    ],
   });
   await gotoApp(page);
   await page.getByTestId("open-agents-view").click();
@@ -266,15 +281,6 @@ test("catalog hides built-ins and shows the shared-agent empty state", async ({
     page.locator('[data-testid^="community-catalog-agent-"]'),
   ).toHaveCount(0);
   await expect(page.getByTestId("community-catalog-use-agent")).toHaveCount(0);
-
-  await page
-    .getByTestId("community-catalog-dialog")
-    .getByRole("button", { name: "Close" })
-    .click();
-  await page.getByLabel("Open actions for Fizz").click();
-  await page.getByRole("menuitem", { name: "Share" }).click();
-  await expect(page.getByTestId("persona-share-catalog")).toHaveCount(0);
-  await expect(page.getByTestId("persona-share-catalog-access")).toHaveCount(0);
 });
 
 test("catalog empty state remains available after reopening", async ({
@@ -296,9 +302,9 @@ test("catalog empty state remains available after reopening", async ({
   );
 });
 
-test("built-in persona edits persist", async ({ page }) => {
+test("persona edits persist", async ({ page }) => {
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz"],
+    personas: [FIZZ_PERSONA_SEED],
     globalAgentConfig: {
       env_vars: { ANTHROPIC_API_KEY: "sk-ant-test" },
       provider: "anthropic",
@@ -322,7 +328,7 @@ test("built-in persona edits persist", async ({ page }) => {
     "My Fizz",
   );
   await expect(
-    page.getByTestId("persona-agent-row-builtin:fizz"),
+    page.getByTestId(`persona-agent-row-${FIZZ_PERSONA_SEED.id}`),
   ).toContainText("Helps teams ship reliably.");
   const personas = await invokeTauri<
     Array<{
@@ -333,7 +339,7 @@ test("built-in persona edits persist", async ({ page }) => {
     }>
   >(page, "list_personas");
   expect(
-    personas.find((persona) => persona.id === "builtin:fizz"),
+    personas.find((persona) => persona.id === FIZZ_PERSONA_SEED.id),
   ).toMatchObject({
     display_name: "My Fizz",
     description: "Helps teams ship reliably.",
@@ -461,7 +467,6 @@ test("the new agent card opens unified create, catalog, and import flows", async
   page,
 }) => {
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz", "builtin:honey", "builtin:bumble"],
     personas: [
       {
         id: "custom:code-reviewer",
@@ -708,7 +713,7 @@ test("team cards use the thread-style overlapping avatar stack", async ({
   await installMockBridge(page, {
     personas: [
       {
-        avatarUrl: "/onboarding/starter-team/fizz.png",
+        avatarUrl: emojiAvatarDataUrl("🎨", "#FF8A65"),
         id: personaIds[0],
         displayName: "Design",
         systemPrompt: "You design interfaces.",
@@ -2750,22 +2755,25 @@ test("team-managed personas do not expose editable actions", async ({
   await expect(page.getByRole("menuitem", { name: "Delete" })).toHaveCount(0);
 });
 
-test("inactive built-ins cannot be used to create teams", async ({ page }) => {
+test("inactive agents cannot be used to create teams", async ({ page }) => {
+  await installMockBridge(page, {
+    personas: [{ ...HONEY_PERSONA_SEED, isActive: false }],
+  });
   await gotoApp(page);
 
   const error = await invokeTauriExpectError(page, "create_team", {
     input: {
       name: "Honeys",
-      personaIds: ["builtin:honey"],
+      personaIds: [HONEY_PERSONA_SEED.id],
     },
   });
 
   expect(error).toBe("Honey is not in My Agents.");
 });
 
-test("built-in removal failures show up from My Agents", async ({ page }) => {
+test("removal failures show up from My Agents", async ({ page }) => {
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:honey"],
+    personas: [HONEY_PERSONA_SEED],
   });
   await gotoApp(page);
 
@@ -2773,7 +2781,7 @@ test("built-in removal failures show up from My Agents", async ({ page }) => {
   await invokeTauri(page, "create_team", {
     input: {
       name: "Honeys",
-      personaIds: ["builtin:honey"],
+      personaIds: [HONEY_PERSONA_SEED.id],
     },
   });
 

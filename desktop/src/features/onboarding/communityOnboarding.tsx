@@ -18,7 +18,6 @@ export type CommunityOnboardingStage =
   | "claiming"
   | "connecting"
   | "profile"
-  | "team-intro"
   | "finalizing"
   /**
    * Backend setup is done and the app is mounting directly on the Welcome
@@ -26,6 +25,41 @@ export type CommunityOnboardingStage =
    * curtain until Welcome reports settled (or a safety timeout), then fades.
    */
   | "entering";
+
+/**
+ * The stage that follows a saved (or already-published) profile. Onboarding
+ * used to introduce a starter agent team here; it now goes straight to
+ * setting up the community.
+ */
+export const COMMUNITY_STAGE_AFTER_PROFILE: CommunityOnboardingStage =
+  "finalizing";
+
+/**
+ * Stages persisted by older builds that no longer exist, mapped to where the
+ * transaction should resume. `team-intro` sat between profile and finalizing.
+ */
+const LEGACY_STAGE_MIGRATIONS: Readonly<
+  Record<string, CommunityOnboardingStage>
+> = {
+  "team-intro": COMMUNITY_STAGE_AFTER_PROFILE,
+};
+
+const COMMUNITY_ONBOARDING_STAGES: readonly CommunityOnboardingStage[] = [
+  "claiming",
+  "connecting",
+  "profile",
+  "finalizing",
+  "entering",
+];
+
+function resolvePersistedStage(
+  stage: unknown,
+): CommunityOnboardingStage | null {
+  if (typeof stage !== "string") return null;
+  const migrated = LEGACY_STAGE_MIGRATIONS[stage];
+  if (migrated) return migrated;
+  return COMMUNITY_ONBOARDING_STAGES.find((known) => known === stage) ?? null;
+}
 
 export type FirstCommunityPage = "join" | "member" | "owned";
 
@@ -105,14 +139,7 @@ function isTransaction(
     typeof transaction.communityName === "string" &&
     typeof transaction.createdAt === "string" &&
     typeof transaction.updatedAt === "string" &&
-    [
-      "claiming",
-      "connecting",
-      "profile",
-      "team-intro",
-      "finalizing",
-      "entering",
-    ].includes(transaction.stage ?? "")
+    COMMUNITY_ONBOARDING_STAGES.some((stage) => stage === transaction.stage)
   );
 }
 
@@ -123,7 +150,15 @@ export function loadCommunityOnboardingTransaction(
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    return isTransaction(parsed) ? parsed : null;
+    if (!parsed || typeof parsed !== "object") return null;
+    // Older builds may have persisted a stage that no longer exists; resume
+    // at its successor instead of discarding the user's progress.
+    const stage = resolvePersistedStage(
+      "stage" in parsed ? parsed.stage : undefined,
+    );
+    if (!stage) return null;
+    const migrated = { ...parsed, stage };
+    return isTransaction(migrated) ? migrated : null;
   } catch {
     return null;
   }

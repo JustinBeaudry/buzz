@@ -60,42 +60,6 @@ async function waitForInvokeBridge(page: import("@playwright/test").Page) {
   );
 }
 
-async function invokeMockCommand(
-  page: import("@playwright/test").Page,
-  command: string,
-  payload?: Record<string, unknown>,
-): Promise<unknown> {
-  await waitForInvokeBridge(page);
-  return page.evaluate(
-    async ({ command: cmd, payload: pl }) => {
-      const tauriWindow = window as Window & {
-        __BUZZ_E2E_INVOKE_MOCK_COMMAND__?: (
-          command: string,
-          payload?: Record<string, unknown>,
-        ) => Promise<unknown>;
-        __TAURI_INTERNALS__?: {
-          invoke?: (
-            command: string,
-            payload?: Record<string, unknown>,
-          ) => Promise<unknown>;
-        };
-      };
-      const invoke =
-        tauriWindow.__BUZZ_E2E_INVOKE_MOCK_COMMAND__ ??
-        tauriWindow.__TAURI_INTERNALS__?.invoke;
-      if (!invoke) throw new Error("Mock invoke bridge is unavailable.");
-      return invoke(cmd, pl);
-    },
-    { command, payload },
-  );
-}
-
-async function activatePersonas(page: import("@playwright/test").Page) {
-  for (const id of ["builtin:fizz"]) {
-    await invokeMockCommand(page, "set_persona_active", { id, active: true });
-  }
-}
-
 /**
  * Open the #agents channel and click an agent's avatar in the message list
  * to open the profile side panel, then navigate to the requested tab.
@@ -115,7 +79,6 @@ async function openAgentProfileFromChannel(
 ) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await waitForInvokeBridge(page);
-  await activatePersonas(page);
 
   // Navigate to the #agents channel
   await page.getByTestId("channel-agents").click();
