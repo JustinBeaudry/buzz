@@ -15,7 +15,6 @@
 //! discovery table. Ensures known providers always have their canonical
 //! `mcp_command`; unknown/custom agents are left untouched.
 
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
@@ -177,7 +176,6 @@ fn run_boot_migrations_inner(app: &tauri::AppHandle, reset_completed: bool) {
     // the same boot) and BEFORE backfill_standalone_agents (so a manufactured
     // definition never snapshots a suffix this strips).
     strip_baked_team_instructions(app);
-    refresh_builtin_agent_avatars(app);
     // B5: manufacture definitions for standalone agents AFTER the fold (so
     // pre-existing definition slugs exist for collision checks) and before event
     // sync republishes — the backfilled link flips the 30177 projection.
@@ -515,217 +513,6 @@ fn patch_json_records(
     }
 }
 
-struct LegacyBuiltInAvatar<'a> {
-    persona_id: &'a str,
-    data_url_sha256: &'a str,
-    // Catalog-created agents persist the blob descriptor for the PNG after
-    // `sanitize_image_for_upload` re-encodes it, not the decoded source bytes.
-    sanitized_media_sha256: &'a str,
-    persona_content_hash: &'a str,
-}
-
-const LEGACY_BUILTIN_AVATARS: &[LegacyBuiltInAvatar<'static>] = &[
-    // Original circular portraits replaced in #2215. Keep these entries so an
-    // install that skips directly over that release still migrates cleanly.
-    LegacyBuiltInAvatar {
-        persona_id: "builtin:fizz",
-        data_url_sha256: "2771b8c9c46aa3c8ac1c4d2acfa23fa9ba35b79c4b1694554e923081e3b8b4d0",
-        sanitized_media_sha256: "1a4964ff4cf6c499df1a77a941c211c7d1e7ef755f1c395bc9a3b0f2878114a6",
-        persona_content_hash: "b36381d042c8eb5c786a1a692c7ba5a47ae129b9972a1473b64d8fe03f4817c1",
-    },
-    LegacyBuiltInAvatar {
-        persona_id: "builtin:honey",
-        data_url_sha256: "1979e54ef77fc94ec688170bd74dade35c563e7fcc82bb0714c672dfb018eab9",
-        sanitized_media_sha256: "0e0ed9a35d4050bdd290aa8138d5ab811f222549f6acc3cee40a7feb65933e1f",
-        persona_content_hash: "9c9b6b11f1cdd56ba645de02213c562e59c3690bf3f217f74a85df8e6575fd06",
-    },
-    LegacyBuiltInAvatar {
-        persona_id: "builtin:bumble",
-        data_url_sha256: "c08cf3b8b4c3f8721df6143367ababdebae8f913b9c654401ba74bb3d233655b",
-        sanitized_media_sha256: "9f798c61f8965b80beb808f505feb0a5b33726545188ea8212cc9ab22d05f0b6",
-        persona_content_hash: "544a73f9106a3c8848b0f308b7a8b6f95077ac8deccdb9ed5552caa833d66c95",
-    },
-    // Circular 384px portraits replaced by the square 128px agent artwork.
-    LegacyBuiltInAvatar {
-        persona_id: "builtin:fizz",
-        data_url_sha256: "6cdf8c338d27ef3c9dd68cf4839f3d62dec2298e2d4e07b851f26f8ba289b377",
-        sanitized_media_sha256: "e6025a21c864750f4b3828c9035bafdbe68ec73bd247745c78309b82fedcbed5",
-        persona_content_hash: "d30d9c7105be0765a2c5ebe89fdb67842201409e79a4b7937f46e2772411d925",
-    },
-    LegacyBuiltInAvatar {
-        persona_id: "builtin:honey",
-        data_url_sha256: "7b51bb3e353aed13b5d6a01d0ad9aa58d63b6bb347f2ed6ee891e7af6149febe",
-        sanitized_media_sha256: "4a64f32d2375ccfe44c0880416bc72b809b055f0fb7d9dddeb8bb3dd6b80c297",
-        persona_content_hash: "e0f88abf79d6826973cc99373ddd1f8350bed1df51064f7b1a0d7e3d7984c49e",
-    },
-    LegacyBuiltInAvatar {
-        persona_id: "builtin:bumble",
-        data_url_sha256: "9e1e841a76069202474393b786ada0628d90711703f8ba96c9ecee84a1c6a593",
-        sanitized_media_sha256: "99d32de5791ec07db70c761db30fd145422e6c8200ba8d189363c3ce53273758",
-        persona_content_hash: "783ee80629046d28f4f07095b1ceedab129661d40a2d5560806bc487a1a65a11",
-    },
-];
-
-struct LegacyAvatarMatch<'a> {
-    persona_id: String,
-    metadata: &'a LegacyBuiltInAvatar<'a>,
-    was_uploaded: bool,
-}
-
-/// Refresh the prior seeded avatar on built-in definitions and linked agent
-/// instances while preserving any avatar the user customized. Matching by the
-/// exact data URL or content-addressed upload digest makes the migration
-/// idempotent and avoids relying on timestamps or other persona fields the
-/// user may also have edited.
-fn refresh_builtin_agent_avatars(app: &tauri::AppHandle) {
-    let Ok(dir) = app.path().app_data_dir() else {
-        return;
-    };
-    let path = dir.join("agents/managed-agents.json");
-    if path.exists() {
-        refresh_builtin_agent_avatars_in_file(
-            &path,
-            LEGACY_BUILTIN_AVATARS,
-            &crate::util::now_iso(),
-        );
-    }
-}
-
-fn refresh_builtin_agent_avatars_in_file(
-    path: &Path,
-    legacy_avatars: &[LegacyBuiltInAvatar<'_>],
-    now: &str,
-) {
-    let Ok(contents) = std::fs::read_to_string(path) else {
-        return;
-    };
-    let Ok(mut records) = serde_json::from_str::<Vec<serde_json::Value>>(&contents) else {
-        eprintln!(
-            "buzz-desktop: refresh-builtin-agent-avatars: invalid JSON in {}",
-            path.display()
-        );
-        return;
-    };
-
-    // Definitions must be migrated first so linked instances can advance from
-    // the exact old persona hash to the exact new one. Only advance an instance
-    // that was in sync before migration; a genuinely drifted instance keeps its
-    // old source version and therefore keeps its out-of-date indicator.
-    let mut persona_version_updates = std::collections::HashMap::new();
-    let mut changed = false;
-    for record in &mut records {
-        let Some(legacy_match) = legacy_avatar_match(record, legacy_avatars) else {
-            continue;
-        };
-        let persona_id = legacy_match.persona_id.clone();
-        let is_definition = record
-            .get("pubkey")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(str::is_empty)
-            && record.get("slug").and_then(serde_json::Value::as_str) == Some(&persona_id);
-        if !is_definition {
-            continue;
-        }
-        let old_version = persona_version_from_record(record);
-        if !replace_builtin_avatar(record, &persona_id, now) {
-            continue;
-        }
-        changed = true;
-        if let (Some(old_version), Some(new_version)) =
-            (old_version, persona_version_from_record(record))
-        {
-            persona_version_updates.insert(persona_id, (old_version, new_version));
-        }
-    }
-
-    for record in &mut records {
-        let Some(legacy_match) = legacy_avatar_match(record, legacy_avatars) else {
-            continue;
-        };
-        let persona_id = legacy_match.persona_id.clone();
-        let legacy_avatar = record
-            .get("avatar_url")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
-        let is_linked_instance = record
-            .get("pubkey")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|pubkey| !pubkey.is_empty())
-            && record.get("persona_id").and_then(serde_json::Value::as_str) == Some(&persona_id);
-        if !is_linked_instance {
-            continue;
-        }
-        let version_update = persona_version_updates
-            .get(&persona_id)
-            .cloned()
-            .or_else(|| {
-                legacy_avatar.as_deref().and_then(|legacy_avatar| {
-                    built_in_persona_version_update(&legacy_match, legacy_avatar, now)
-                })
-            });
-        if !replace_builtin_avatar(record, &persona_id, now) {
-            continue;
-        }
-        changed = true;
-        if let Some((old_version, new_version)) = version_update {
-            let source_was_current = record
-                .get("persona_source_version")
-                .and_then(serde_json::Value::as_str)
-                == Some(old_version.as_str());
-            if source_was_current {
-                record["persona_source_version"] = serde_json::Value::String(new_version);
-            }
-        }
-    }
-
-    if changed {
-        if let Ok(bytes) = serde_json::to_vec_pretty(&records) {
-            if let Err(e) = crate::managed_agents::atomic_write_json_restricted(path, &bytes) {
-                eprintln!("buzz-desktop: refresh-builtin-agent-avatars: {e}");
-            }
-        }
-    }
-}
-
-fn legacy_avatar_match<'a>(
-    record: &serde_json::Value,
-    legacy_avatars: &'a [LegacyBuiltInAvatar<'a>],
-) -> Option<LegacyAvatarMatch<'a>> {
-    let persona_id = record
-        .get("persona_id")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| record.get("slug").and_then(serde_json::Value::as_str))?;
-    let current_avatar = record
-        .get("avatar_url")
-        .and_then(serde_json::Value::as_str)?;
-    let data_url_sha256 = hex::encode(Sha256::digest(current_avatar.as_bytes()));
-    let uploaded_media_sha256 = uploaded_media_sha256(current_avatar);
-    let metadata = legacy_avatars.iter().find(|legacy| {
-        legacy.persona_id == persona_id
-            && (legacy.data_url_sha256 == data_url_sha256
-                || uploaded_media_sha256.as_deref() == Some(legacy.sanitized_media_sha256))
-    })?;
-    let was_uploaded = uploaded_media_sha256.as_deref() == Some(metadata.sanitized_media_sha256);
-    Some(LegacyAvatarMatch {
-        persona_id: persona_id.to_string(),
-        metadata,
-        was_uploaded,
-    })
-}
-
-fn uploaded_media_sha256(avatar_url: &str) -> Option<String> {
-    let url = url::Url::parse(avatar_url).ok()?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return None;
-    }
-    let filename = url.path_segments()?.next_back()?;
-    let (sha256, extension) = filename.rsplit_once('.')?;
-    (!extension.is_empty()
-        && sha256.len() == 64
-        && sha256.bytes().all(|byte| byte.is_ascii_hexdigit()))
-    .then(|| sha256.to_string())
-}
-
 fn persona_version_from_record(record: &serde_json::Value) -> Option<String> {
     let record: crate::managed_agents::ManagedAgentRecord =
         serde_json::from_value(record.clone()).ok()?;
@@ -733,45 +520,6 @@ fn persona_version_from_record(record: &serde_json::Value) -> Option<String> {
     Some(crate::managed_agents::persona_events::persona_content_hash(
         &crate::managed_agents::persona_events::persona_event_content(&definition),
     ))
-}
-
-fn built_in_persona_version_update(
-    legacy_match: &LegacyAvatarMatch<'_>,
-    legacy_avatar: &str,
-    now: &str,
-) -> Option<(String, String)> {
-    let mut current =
-        crate::managed_agents::built_in_persona_definition(&legacy_match.persona_id, now)?;
-    let new_version = crate::managed_agents::persona_events::persona_content_hash(
-        &crate::managed_agents::persona_events::persona_event_content(&current),
-    );
-    let old_version = if legacy_match.was_uploaded {
-        legacy_match.metadata.persona_content_hash.to_string()
-    } else {
-        current.avatar_url = Some(legacy_avatar.to_string());
-        crate::managed_agents::persona_events::persona_content_hash(
-            &crate::managed_agents::persona_events::persona_event_content(&current),
-        )
-    };
-    Some((old_version, new_version))
-}
-
-fn replace_builtin_avatar(record: &mut serde_json::Value, persona_id: &str, now: &str) -> bool {
-    let Some(replacement) = crate::managed_agents::built_in_persona_avatar_url(persona_id) else {
-        return false;
-    };
-    let Some(record) = record.as_object_mut() else {
-        return false;
-    };
-    record.insert(
-        "avatar_url".to_string(),
-        serde_json::Value::String(replacement.to_string()),
-    );
-    record.insert(
-        "updated_at".to_string(),
-        serde_json::Value::String(now.to_string()),
-    );
-    true
 }
 
 /// Create symlinks for shared agent data files from the current (worktree)
@@ -1407,10 +1155,6 @@ mod test_support;
 #[cfg(test)]
 #[path = "migration_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "migration_avatar_tests.rs"]
-mod avatar_tests;
 
 #[cfg(test)]
 #[path = "migration_command_tests.rs"]

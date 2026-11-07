@@ -190,12 +190,9 @@ fn test_editing_a_member_definition_changes_the_team_bytes() {
     );
 }
 
-/// Real built-in record (avatar cleared — live built-ins ship ~170 KiB inline PNG).
+/// A record flagged built-in, with the canonical `builtin:` id.
 fn builtin_record(id: &str) -> AgentDefinition {
-    let mut record = crate::managed_agents::built_in_persona_definition(id, "2026-07-30T00:00:00Z")
-        .unwrap_or_else(|| panic!("'{id}' is not a built-in persona"));
-    record.avatar_url = None;
-    record
+    crate::managed_agents::builtin_persona_fixture(id, "2026-07-30T00:00:00Z")
 }
 
 #[test]
@@ -860,27 +857,24 @@ run_fixture_table!(
 );
 
 #[test]
-fn test_real_builtin_without_avatar_mutation_projects_successfully() {
-    // A real built-in (fizz) has a ~170 KiB oversized avatar that is stripped in member_projection.
-    let builtin =
-        crate::managed_agents::built_in_persona_definition("builtin:fizz", "2026-07-30T00:00:00Z")
-            .expect("builtin:fizz must exist");
-    let has_large_avatar = builtin
-        .avatar_url
-        .as_deref()
-        .is_some_and(|url| url.len() > MAX_AVATAR_URL_BYTES);
+fn test_builtin_with_oversized_avatar_projects_successfully() {
+    // A built-in with an oversized inline avatar (the bee personas shipped
+    // ~25 KiB PNGs) has that avatar stripped in member_projection.
+    let mut builtin = builtin_record("builtin:fizz");
+    builtin.avatar_url = Some(format!(
+        "data:image/png;base64,{}",
+        "A".repeat(MAX_AVATAR_URL_BYTES)
+    ));
     let mut t = team();
     t.instructions = None;
     let content = build_team_catalog_content(&t, &[builtin]).expect(
         "a team containing a real built-in must project successfully without avatar mutation",
     );
     assert_eq!(content.members.len(), 1);
-    if has_large_avatar {
-        assert!(
-            content.members[0].avatar_url.is_none(),
-            "oversized built-in avatar must be omitted, not rejected"
-        );
-    }
+    assert!(
+        content.members[0].avatar_url.is_none(),
+        "oversized built-in avatar must be omitted, not rejected"
+    );
     assert!(
         validate_team_catalog_content(&content).is_ok(),
         "projected content must pass full validation"
