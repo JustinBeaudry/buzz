@@ -14,6 +14,10 @@
   <a href="LICENSE">Apache 2.0</a>
 </p>
 
+> **Actual Reality build:** to install this fork's Buzz Desktop (with the remote agents), run
+> `curl -fsSL https://github.com/JustinBeaudry/buzz/releases/latest/download/install.sh | bash`
+> in Terminal. Details in [INSTALL.md](INSTALL.md).
+
 <p align="center">
   <img src="docs/assets/screenshots/channel-thread.png" alt="A Buzz project channel where people and an agent coordinate on a release plan" width="100%">
 </p>
