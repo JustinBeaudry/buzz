@@ -652,7 +652,6 @@ test.describe("create dialog", () => {
           model: "opus[1m]",
         },
       ],
-      activePersonaIds: ["persona-opus"],
     });
     await page.goto("/");
     await page.getByTestId("open-agents-view").click();

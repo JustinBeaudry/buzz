@@ -149,9 +149,8 @@ fn definition_hashes(records: &[ManagedAgentRecord]) -> HashMap<String, String> 
 /// Stripping a definition's prompt changes its `persona_content_hash`, so every
 /// linked instance would otherwise light up "out of date" in the Agents menu
 /// for a change the user never made — a badge that only clears on the next
-/// start, when `apply_persona_snapshot` re-pins. Same conditional as
-/// `refresh_builtin_agent_avatars`: move the pin only when it still equals the
-/// definition's PRE-strip hash. An instance that had genuinely drifted keeps
+/// start, when `apply_persona_snapshot` re-pins. Move the pin only when it
+/// still equals the definition's PRE-strip hash. An instance that had genuinely drifted keeps
 /// its stale pin, and its badge.
 fn repin_current_instances(
     records: &mut [ManagedAgentRecord],

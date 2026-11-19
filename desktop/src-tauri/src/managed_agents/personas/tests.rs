@@ -1,9 +1,8 @@
 use super::{
-    built_in_persona_records, ensure_persona_ids_are_active, ensure_persona_is_active,
-    merge_personas, migrate_retired_personas, validate_persona_activation_change,
-    validate_persona_deletion, BUILT_IN_PERSONAS, RETIRED_PERSONAS,
+    ensure_persona_ids_are_active, ensure_persona_is_active, merge_personas,
+    migrate_retired_personas, validate_persona_activation_change, validate_persona_deletion,
+    RETIRED_PERSONAS,
 };
-use crate::managed_agents::discovery::{default_agent_command, effective_agent_command};
 use crate::managed_agents::AgentDefinition;
 
 fn custom_persona(id: &str, display_name: &str) -> AgentDefinition {
@@ -36,29 +35,11 @@ fn custom_persona(id: &str, display_name: &str) -> AgentDefinition {
 }
 
 #[test]
-fn merge_personas_adds_missing_built_ins() {
+fn merge_personas_creates_nothing_for_a_fresh_store() {
     let (records, changed) = merge_personas(Vec::new(), "2026-03-19T00:00:00Z");
 
-    assert!(changed);
-    assert_eq!(records.len(), BUILT_IN_PERSONAS.len());
-    assert!(records.iter().all(|record| record.is_builtin));
-    assert!(records
-        .iter()
-        .any(|record| record.id == "builtin:fizz" && record.runtime.is_none()));
-    let display_names: Vec<&str> = records
-        .iter()
-        .map(|record| record.display_name.as_str())
-        .collect();
-    assert_eq!(display_names, vec!["Fizz", "Honey", "Pollen"]);
-    let active_ids: Vec<&str> = records
-        .iter()
-        .filter(|record| record.is_active)
-        .map(|record| record.id.as_str())
-        .collect();
-    assert_eq!(
-        active_ids,
-        vec!["builtin:fizz", "builtin:honey", "builtin:bumble"]
-    );
+    assert!(records.is_empty());
+    assert!(!changed);
 }
 
 #[test]
@@ -66,72 +47,79 @@ fn merge_personas_preserves_custom_records() {
     let custom = custom_persona("custom:test", "Custom");
     let (records, changed) = merge_personas(vec![custom.clone()], "2026-03-19T00:00:00Z");
 
-    assert!(changed);
-    assert!(records.iter().any(|record| record.id == custom.id));
+    assert!(!changed);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].id, custom.id);
+    assert_eq!(records[0].updated_at, custom.updated_at);
 }
 
 #[test]
-fn merge_personas_preserves_builtin_edits() {
-    let mut edited_builtin = custom_persona("builtin:fizz", "My Fizz");
-    edited_builtin.is_builtin = true;
-    edited_builtin.is_active = true;
-    edited_builtin.system_prompt = "User-edited instructions".to_string();
-    edited_builtin.name_pool = vec!["User-edited name".to_string()];
-    edited_builtin.env_vars =
+fn merge_personas_demotes_a_stored_bee_builtin_and_keeps_it_active() {
+    // Fizz, Honey and Pollen shipped as built-ins in earlier releases. A stored
+    // copy is demoted to an ordinary persona, never removed, so managed agents
+    // and teams that reference it keep working.
+    let mut fizz = custom_persona("builtin:fizz", "My Fizz");
+    fizz.is_builtin = true;
+    fizz.is_active = true;
+    fizz.system_prompt = "User-edited instructions".to_string();
+    fizz.name_pool = vec!["User-edited name".to_string()];
+    fizz.env_vars =
         std::collections::BTreeMap::from([("USER_SETTING".to_string(), "value".to_string())]);
 
-    let (records, changed) = merge_personas(vec![edited_builtin.clone()], "2026-03-19T00:00:00Z");
+    let (records, changed) = merge_personas(vec![fizz.clone()], "2026-11-07T00:00:00Z");
 
-    assert!(changed); // The remaining seeded built-ins are added.
-    let fizz = records
-        .iter()
-        .find(|record| record.id == "builtin:fizz")
-        .expect("fizz built-in should exist");
-    assert_eq!(fizz.display_name, edited_builtin.display_name);
-    assert_eq!(fizz.system_prompt, edited_builtin.system_prompt);
-    assert_eq!(fizz.name_pool, edited_builtin.name_pool);
-    assert_eq!(fizz.env_vars, edited_builtin.env_vars);
-    assert_eq!(fizz.is_active, edited_builtin.is_active);
+    assert!(changed);
+    assert_eq!(records.len(), 1, "no built-ins are added");
+    let demoted = &records[0];
+    assert_eq!(demoted.id, "builtin:fizz");
+    assert!(!demoted.is_builtin);
+    assert!(demoted.is_active);
+    assert_eq!(demoted.display_name, fizz.display_name);
+    assert_eq!(demoted.system_prompt, fizz.system_prompt);
+    assert_eq!(demoted.name_pool, fizz.name_pool);
+    assert_eq!(demoted.env_vars, fizz.env_vars);
+    assert_eq!(demoted.created_at, fizz.created_at);
+    assert_eq!(demoted.updated_at, "2026-11-07T00:00:00Z");
+
+    let (_, changed_again) = merge_personas(records, "2026-11-08T00:00:00Z");
+    assert!(!changed_again, "demotion is idempotent");
 }
 
 #[test]
-fn merge_personas_restores_builtin_marker_without_resetting_edits() {
-    let mut edited_builtin = custom_persona("builtin:fizz", "My Fizz");
-    edited_builtin.is_builtin = false;
+fn merge_personas_does_not_re_promote_a_bee_persona() {
+    let fizz = custom_persona("builtin:fizz", "My Fizz");
 
-    let (records, changed) = merge_personas(vec![edited_builtin], "2026-03-19T00:00:00Z");
+    let (records, changed) = merge_personas(vec![fizz], "2026-03-19T00:00:00Z");
 
-    assert!(changed);
-    let fizz = records
-        .iter()
-        .find(|record| record.id == "builtin:fizz")
-        .expect("fizz built-in should exist");
-    assert!(fizz.is_builtin);
-    assert_eq!(fizz.display_name, "My Fizz");
+    assert!(!changed);
+    assert!(!records[0].is_builtin);
 }
 
 #[test]
-fn merge_personas_adds_fizz_and_retires_old_builtins_for_existing_store() {
-    let mut legacy_builtins = vec![custom_persona("builtin:solo", "Solo")];
-    for persona in &mut legacy_builtins {
-        persona.is_builtin = true;
-        persona.avatar_url = None;
-    }
+fn a_demoted_bee_persona_can_be_deleted() {
+    let mut honey = custom_persona("builtin:honey", "Honey");
+    honey.is_builtin = true;
+    assert!(
+        validate_persona_deletion(&honey, false).is_err(),
+        "deletion was blocked while the persona was built-in"
+    );
 
-    let (records, changed) = merge_personas(legacy_builtins, "2026-03-19T00:00:00Z");
+    let (records, _) = merge_personas(vec![honey], "2026-11-07T00:00:00Z");
+
+    assert!(validate_persona_deletion(&records[0], false).is_ok());
+}
+
+#[test]
+fn merge_personas_retires_old_builtins_for_existing_store() {
+    let mut solo = custom_persona("builtin:solo", "Solo");
+    solo.is_builtin = true;
+    solo.avatar_url = None;
+
+    let (records, changed) = merge_personas(vec![solo], "2026-03-19T00:00:00Z");
 
     assert!(changed);
-    let fizz = records
-        .iter()
-        .find(|record| record.id == "builtin:fizz")
-        .expect("fizz built-in should exist");
-    assert!(fizz.is_builtin);
-    assert!(fizz.is_active);
-
-    let solo = records
-        .iter()
-        .find(|record| record.id == "builtin:solo")
-        .expect("old solo record should be retained as retired custom persona");
+    assert_eq!(records.len(), 1);
+    let solo = &records[0];
     assert!(!solo.is_builtin);
     assert!(!solo.is_active);
     assert_eq!(solo.display_name, "Solo (retired)");
@@ -383,38 +371,4 @@ fn migrate_is_idempotent() {
 
     // 4. Run again on result of (3) — should be no-op.
     assert!(!migrate_retired_personas(&mut stored_pre_demotion, now));
-}
-
-// ── Fizz default harness ──────────────────────────────────────────────────────
-
-#[test]
-fn fizz_builtin_has_no_pinned_runtime() {
-    // The Fizz built-in must not hard-pin a runtime so it inherits the
-    // bundled default (buzz-agent) rather than requiring goose on PATH.
-    let records = built_in_persona_records("2026-01-01T00:00:00Z");
-    let fizz = records
-        .iter()
-        .find(|r| r.id == "builtin:fizz")
-        .expect("builtin:fizz must exist");
-    assert_eq!(
-        fizz.runtime, None,
-        "Fizz built-in must not pin a runtime — it should inherit the default"
-    );
-}
-
-#[test]
-fn fizz_builtin_resolves_to_buzz_agent() {
-    // With no runtime pin, effective_agent_command must fall through to
-    // default_agent_command(), which resolves the bundled buzz-agent.
-    let records = built_in_persona_records("2026-01-01T00:00:00Z");
-    assert_eq!(
-        effective_agent_command(Some("builtin:fizz"), &records, None),
-        default_agent_command(),
-        "Fizz must resolve to the bundled default harness, not goose"
-    );
-    assert_eq!(
-        effective_agent_command(Some("builtin:fizz"), &records, None),
-        "buzz-agent",
-        "Fizz must resolve to buzz-agent specifically"
-    );
 }

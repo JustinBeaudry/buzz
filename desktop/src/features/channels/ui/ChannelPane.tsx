@@ -45,10 +45,7 @@ import { useChannelWorkingAgentPubkeys } from "@/features/agents/agentWorkingSig
 import { useCardMintJobs } from "@/features/agents/cardMintStore";
 import { BotActivityComposerAction } from "@/features/channels/ui/BotActivityBar";
 import { ChannelComposerActivityAccessory } from "@/features/channels/ui/ChannelComposerActivityAccessory";
-import {
-  containsWelcomePersonaMention,
-  WelcomeComposerGuidanceLayer,
-} from "@/features/channels/ui/WelcomeComposerBanner";
+import { WelcomeComposerGuidanceLayer } from "@/features/channels/ui/WelcomeComposerBanner";
 import { useWelcomeComposerBanner } from "@/features/channels/ui/useWelcomeComposerBanner";
 import {
   mentionsKnownAgent,
@@ -108,10 +105,6 @@ export const ChannelPane = React.memo(function ChannelPane({
   isTimelineError = false,
   isTimelineLoading,
   onRetryTimeline,
-  entranceMessageId = null,
-  onEntranceMessageComplete,
-  welcomeKickoffStage = null,
-  welcomeKickoffSettingUp = false,
   messages,
   threadSummaries,
   huddleThreadRepliesError = false,
@@ -300,8 +293,7 @@ export const ChannelPane = React.memo(function ChannelPane({
     ) => {
       const shouldCompleteWelcomeBanner =
         isActiveWelcomeChannel &&
-        (containsWelcomePersonaMention(content) ||
-          mentionsKnownAgent(mentionPubkeys, knownAgentPubkeys));
+        mentionsKnownAgent(mentionPubkeys, knownAgentPubkeys);
       // A send prepared into another channel (a DM message that mentions an
       // agent outside the DM) lands its row there, so this timeline never sees
       // it, and the arm skips it. The pane navigates there once the send
@@ -372,9 +364,6 @@ export const ChannelPane = React.memo(function ChannelPane({
       }),
     [activeChannel, currentPubkey, profiles],
   );
-  const handleWelcomeAddAgent = React.useCallback(() => {
-    onAddAgent?.({ beforeSend: armOwnSend });
-  }, [armOwnSend, onAddAgent]);
   const standardChannelIntro = useChannelIntro({
     activeChannel,
     onAddAgent,
@@ -382,7 +371,6 @@ export const ChannelPane = React.memo(function ChannelPane({
     onBrowseChannels,
     onCreateChannel,
     onOpenMembers,
-    onWelcomeAddAgent: onAddAgent ? handleWelcomeAddAgent : undefined,
   });
   const channelIntro = isHuddleTranscript ? null : standardChannelIntro;
   const { mainTimelineEntries, recentMentions, visibleMessages } =
@@ -677,8 +665,6 @@ export const ChannelPane = React.memo(function ChannelPane({
               isError={isTimelineError}
               isLoading={isHuddleTranscript ? false : isTimelineLoading}
               onRetry={onRetryTimeline}
-              entranceMessageId={entranceMessageId}
-              onEntranceMessageComplete={onEntranceMessageComplete}
               mainEntries={mainTimelineEntries}
               threadSummaries={threadSummaries}
               messages={visibleMessages}
@@ -754,11 +740,8 @@ export const ChannelPane = React.memo(function ChannelPane({
                   {isActiveWelcomeChannel && !timeoutActive ? (
                     <WelcomeComposerGuidanceLayer
                       onDismiss={handleDismissWelcomeBanner}
-                      settingUp={welcomeKickoffSettingUp}
                       state={welcomeComposerBannerState}
-                    >
-                      {welcomeKickoffStage}
-                    </WelcomeComposerGuidanceLayer>
+                    />
                   ) : null}
                   {timeoutActive ? <ComposerTimeoutBanner /> : null}
                   <ComposerDockBackdrop gutterClassName="inset-x-5" />

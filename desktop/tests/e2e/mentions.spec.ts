@@ -8,6 +8,7 @@ import {
   openChannelBrowser,
   TEST_IDENTITIES,
 } from "../helpers/bridge";
+import { FIZZ_PERSONA_SEED } from "../helpers/personas";
 
 const MOCK_VIEWER_PUBKEY = "deadbeef".repeat(8);
 const GENERAL_CHANNEL_ID = "9a1657ac-f7aa-5db0-b632-d8bbeb6dfb50";
@@ -440,7 +441,7 @@ test("@ trigger prioritizes channel members before runnable personas and other m
   page,
 }) => {
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz"],
+    personas: [FIZZ_PERSONA_SEED],
     managedAgents: [
       {
         pubkey: TEST_IDENTITIES.charlie.pubkey,
@@ -928,7 +929,7 @@ test("blocks non-participant persona mentions in DM threads", async ({
   page,
 }) => {
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz"],
+    personas: [FIZZ_PERSONA_SEED],
   });
   await page.goto("/");
   await page.getByTestId("channel-bob-tyler").click();
@@ -1535,7 +1536,7 @@ test("selecting a persona mention creates a channel agent before sending and sta
   page,
 }) => {
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz"],
+    personas: [FIZZ_PERSONA_SEED],
     // Far longer than the test runs: sign_event landing below proves the
     // publish no longer waits for start_managed_agent to resolve.
     startManagedAgentDelayMs: 45_000,
@@ -1639,12 +1640,12 @@ test("selecting a persona mention reuses an existing persona agent", async ({
   page,
 }) => {
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz"],
+    personas: [FIZZ_PERSONA_SEED],
     managedAgents: [
       {
         pubkey: REUSABLE_PERSONA_AGENT_PUBKEY,
         name: "Fizz",
-        personaId: "builtin:fizz",
+        personaId: FIZZ_PERSONA_SEED.id,
         status: "stopped",
       },
     ],

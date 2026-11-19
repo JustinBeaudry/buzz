@@ -31,12 +31,11 @@ struct BuiltInTeam {
     persona_ids: &'static [&'static str],
 }
 
-const BUILT_IN_TEAMS: &[BuiltInTeam] = &[BuiltInTeam {
-    id: "builtin-team:welcome",
-    name: "Welcome Team",
-    description: Some("A friendly starter trio ready to help you plan, create, and ship."),
-    persona_ids: &["builtin:fizz", "builtin:honey", "builtin:bumble"],
-}];
+// Desktop ships no built-in teams. The former Welcome Team
+// (`builtin-team:welcome`, the Fizz/Honey/Pollen starter trio) is left out of
+// RETIRED_BUILT_IN_TEAMS on purpose: its starter agents carry its id as their
+// `team_id`, so a stored copy is demoted and kept rather than purged.
+const BUILT_IN_TEAMS: &[BuiltInTeam] = &[];
 
 // Built-in teams that have been retired. A stored copy that still exactly
 // matches its seed is purged on load (the user never touched it); customized

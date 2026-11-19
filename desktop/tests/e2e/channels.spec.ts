@@ -13,6 +13,7 @@ import {
   openCreateChannelDialog,
   openNewMessagePage,
 } from "../helpers/bridge";
+import { FIZZ_PERSONA_SEED } from "../helpers/personas";
 
 const GENERAL_CHANNEL_ID = "9a1657ac-f7aa-5db0-b632-d8bbeb6dfb50";
 const RANDOM_CHANNEL_ID = "9dae0116-799b-5071-a0a8-fdd30a91a35d";
@@ -773,7 +774,7 @@ test("sends the first message from the new direct message composer", async ({
 
 test("creates the DM before preparing a persona mention", async ({ page }) => {
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz"],
+    personas: [FIZZ_PERSONA_SEED],
     createManagedAgentDelayMs: 1_000,
   });
   await page.goto("/");
@@ -872,7 +873,7 @@ test("routes an agent mention from an existing DM to the expanded conversation",
   // Delay persona provisioning so the follow-up expanded-DM open/start sequence
   // cannot collapse into the same fast CI tick before assertions observe it.
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz"],
+    personas: [FIZZ_PERSONA_SEED],
     createManagedAgentDelayMs: 100,
   });
   await page.goto("/");
@@ -1003,7 +1004,7 @@ test("does not reroute an expanded DM after the user navigates away", async ({
   page,
 }) => {
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz"],
+    personas: [FIZZ_PERSONA_SEED],
     sendMessageDelayMs: 1_000,
   });
   await page.goto("/");
@@ -1035,7 +1036,7 @@ test("does not reroute an expanded DM after the channel pane unmounts", async ({
   page,
 }) => {
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz"],
+    personas: [FIZZ_PERSONA_SEED],
     openDmDelayMs: 1_000,
   });
   await page.goto("/");
@@ -1070,7 +1071,7 @@ test("drops an expanded DM after the first message fails", async ({ page }) => {
   // Delay persona provisioning so the follow-up expanded-DM open/start sequence
   // cannot collapse into the same fast CI tick before assertions observe it.
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz"],
+    personas: [FIZZ_PERSONA_SEED],
     createManagedAgentDelayMs: 100,
     sendMessageErrors: [sendError],
   });
@@ -1169,7 +1170,7 @@ test("publishes into an expanded DM even when agent startup fails", async ({
   // the preceding "drops an expanded DM after the first message fails" spec.
   const startError = "Mock agent startup failed.";
   await installMockBridge(page, {
-    activePersonaIds: ["builtin:fizz"],
+    personas: [FIZZ_PERSONA_SEED],
     startManagedAgentErrors: [startError],
   });
   await page.goto("/");
@@ -4841,13 +4842,13 @@ test("members sidebar retains distinct same-persona managed agents", async ({
       {
         pubkey: outOfChannelAgentPubkey,
         name: "Pinky",
-        personaId: "builtin:fizz",
+        personaId: FIZZ_PERSONA_SEED.id,
         status: "stopped",
       },
       {
         pubkey: inChannelAgentPubkey,
         name: "Pinky",
-        personaId: "builtin:fizz",
+        personaId: FIZZ_PERSONA_SEED.id,
         status: "running",
         channelNames: ["general"],
       },

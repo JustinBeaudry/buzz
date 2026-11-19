@@ -18,11 +18,14 @@ import { TeamSnapshotImportDialog } from "./TeamSnapshotImportDialog";
 import { TeamShareDialog } from "./TeamShareDialog";
 import { TeamDeleteDialog } from "./TeamDeleteDialog";
 import { TeamDialog } from "./TeamDialog";
+import { RelayAgentsSection } from "./RelayAgentsSection";
 import { TeamsSection } from "./TeamsSection";
 import { UnifiedAgentsSection } from "./UnifiedAgentsSection";
 import { useManagedAgentActions } from "./useManagedAgentActions";
 import { usePersonaActions } from "./usePersonaActions";
 import { useTeamActions } from "./useTeamActions";
+import { useRelayAgentRows } from "./useRelayAgentRows";
+import { useAppNavigation } from "@/app/navigation/useAppNavigation";
 import { useProfilePanel } from "@/shared/context/ProfilePanelContext";
 import { useBakedBuildEnvQuery } from "@/features/agents/hooks";
 import { isManagedAgentActive } from "@/features/agents/lib/managedAgentControlActions";
@@ -43,6 +46,11 @@ export function AgentsView() {
   const { data: bakedEnv } = useBakedBuildEnvQuery({ enabled: true });
   const inheritedDefaults = getInheritedAgentDefaults(globalConfig, bakedEnv);
   const agents = useManagedAgentActions();
+  const { goChannel } = useAppNavigation();
+  const relayAgents = useRelayAgentRows(
+    agents.relayAgentsQuery.data,
+    agents.managedAgents,
+  );
   const personas = usePersonaActions();
   const teamImportInputRef = React.useRef<HTMLInputElement | null>(null);
   const aiDefaultsTriggerRef = React.useRef<HTMLButtonElement>(null);
@@ -276,6 +284,29 @@ export function AgentsView() {
                 void personas.handleSetActive(persona, false, "library");
               }}
               onDeletePersona={personas.openDelete}
+            />
+
+            <RelayAgentsSection
+              error={
+                agents.relayAgentsQuery.error instanceof Error
+                  ? agents.relayAgentsQuery.error
+                  : null
+              }
+              // Wait for the local inventory too, so an agent that is both
+              // local and on the relay never flashes in this section.
+              isLoading={
+                agents.relayAgentsQuery.isLoading ||
+                agents.managedAgentsQuery.isLoading
+              }
+              onOpenChannel={(channelId) => {
+                void goChannel(channelId);
+              }}
+              onOpenProfile={(pubkey) => {
+                openProfilePanel?.(pubkey);
+              }}
+              onRetry={agents.refetchRelayAgents}
+              profiles={relayAgents.profiles}
+              rows={relayAgents.rows}
             />
 
             <TeamsSection

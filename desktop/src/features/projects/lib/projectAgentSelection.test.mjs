@@ -3,19 +3,12 @@ import test from "node:test";
 
 import { pickDefaultProjectsAgent } from "./projectAgentSelection.ts";
 
-test("prefers Fizz over the first running agent", () => {
-  const implementationPartner = {
-    name: "Implementation Partner",
-    personaId: "custom:implementation",
-  };
-  const fizz = { name: "Fizz", personaId: "builtin:fizz" };
-  assert.equal(pickDefaultProjectsAgent([implementationPartner, fizz]), fizz);
+test("picks the first running agent", () => {
+  const builder = { name: "Builder", personaId: "custom:builder" };
+  const reviewer = { name: "Reviewer", personaId: "custom:reviewer" };
+  assert.equal(pickDefaultProjectsAgent([builder, reviewer]), builder);
 });
 
-test("ignores an unmanaged agent using the Fizz display name", () => {
-  const managed = { name: "Builder", personaId: "custom:builder" };
-  const spoofedFizz = { name: "Fizz" };
-  assert.equal(pickDefaultProjectsAgent([managed, spoofedFizz]), managed);
-  assert.equal(pickDefaultProjectsAgent([managed]), managed);
+test("returns null when no agent is running", () => {
   assert.equal(pickDefaultProjectsAgent([]), null);
 });

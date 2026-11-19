@@ -215,7 +215,6 @@ type MockBridgeOptions = {
    *  returns results[N]; when exhausted the last entry repeats. Takes precedence
    *  over `installAcpRuntimeResult`. Use for fail-then-succeed Retry tests. */
   installAcpRuntimeResults?: MockInstallRuntimeResult[];
-  activePersonaIds?: string[];
   /**
    * Listing returned by the mocked `get_agent_memory` command. Pass a single
    * listing for any managed agent, or a pubkey-keyed record for per-agent data.

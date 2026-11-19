@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  COMMUNITY_STAGE_AFTER_PROFILE,
   clearCommunityOnboardingTransaction,
   isTransactionStillConnecting,
   loadCommunityOnboardingTransaction,
@@ -137,6 +138,71 @@ test("malformed persisted state is ignored and can be cleared", () => {
   assert.equal(loadCommunityOnboardingTransaction(storage), null);
   clearCommunityOnboardingTransaction(storage);
   assert.equal(storage.length, 0);
+});
+
+test("a saved profile moves the transaction straight to finalizing", () => {
+  const storage = createMemoryStorage();
+  const started = startCommunityOnboarding(
+    { source: "add-community", relayUrl: "wss://relay.example" },
+    storage,
+    new Date("2026-07-16T00:00:00Z"),
+  );
+  const atProfile = updateCommunityOnboardingTransaction(
+    started,
+    { stage: "profile", communityId: "community-id" },
+    storage,
+    new Date("2026-07-16T00:01:00Z"),
+  );
+
+  const afterProfile = updateCommunityOnboardingTransaction(
+    atProfile,
+    { stage: COMMUNITY_STAGE_AFTER_PROFILE },
+    storage,
+    new Date("2026-07-16T00:02:00Z"),
+  );
+
+  assert.equal(afterProfile.stage, "finalizing");
+  assert.equal(
+    loadCommunityOnboardingTransaction(storage)?.stage,
+    "finalizing",
+  );
+});
+
+test("a transaction persisted at the retired team-intro stage resumes at finalizing", () => {
+  const storage = createMemoryStorage({
+    "buzz-community-onboarding-transaction.v1": JSON.stringify({
+      id: "legacy-transaction",
+      source: "deep-link-join",
+      stage: "team-intro",
+      relayUrl: "wss://relay.example",
+      communityName: "Relay Example",
+      communityId: "community-id",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:01:00.000Z",
+    }),
+  });
+
+  const resumed = loadCommunityOnboardingTransaction(storage);
+
+  assert.equal(resumed?.id, "legacy-transaction");
+  assert.equal(resumed?.stage, "finalizing");
+  assert.equal(resumed?.communityId, "community-id");
+});
+
+test("a transaction persisted at an unknown stage is ignored", () => {
+  const storage = createMemoryStorage({
+    "buzz-community-onboarding-transaction.v1": JSON.stringify({
+      id: "unknown-stage",
+      source: "add-community",
+      stage: "meet-the-bees",
+      relayUrl: "wss://relay.example",
+      communityName: "Relay Example",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:01:00.000Z",
+    }),
+  });
+
+  assert.equal(loadCommunityOnboardingTransaction(storage), null);
 });
 
 test("completion is scoped by relay and pubkey and preserves legacy gate", () => {

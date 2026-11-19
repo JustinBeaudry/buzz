@@ -9,12 +9,9 @@
 
 use super::*;
 
-/// Real built-in record (avatar cleared — live built-ins ship ~170 KiB inline PNG).
+/// A record flagged built-in, with the canonical `builtin:` id.
 fn builtin(id: &str) -> AgentDefinition {
-    let mut record = crate::managed_agents::built_in_persona_definition(id, NOW)
-        .unwrap_or_else(|| panic!("'{id}' is not a built-in persona"));
-    record.avatar_url = None;
-    record
+    crate::managed_agents::builtin_persona_fixture(id, NOW)
 }
 
 /// A published member whose fields and hint exactly project the local built-in.

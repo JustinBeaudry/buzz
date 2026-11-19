@@ -35,17 +35,13 @@ export function useChannelIntro({
   onBrowseChannels,
   onCreateChannel,
   onOpenMembers,
-  onWelcomeAddAgent,
 }: {
   activeChannel: Channel | null;
-  onAddAgent?: (options?: {
-    beforeSend?: (channelId: string) => () => void;
-  }) => void;
+  onAddAgent?: () => void;
   onAddFiles?: () => void;
   onBrowseChannels?: () => void;
   onCreateChannel?: () => void;
   onOpenMembers?: () => void;
-  onWelcomeAddAgent?: () => void;
 }) {
   const projectHome = useIsProjectHomeChannel(activeChannel?.id);
 
@@ -74,11 +70,11 @@ export function useChannelIntro({
         });
       }
 
-      if (onWelcomeAddAgent) {
+      if (onAddAgent) {
         actions.push({
           icon: <Bot aria-hidden className="h-6 w-6" />,
           label: "Create an agent",
-          onClick: onWelcomeAddAgent,
+          onClick: onAddAgent,
           testId: "welcome-intro-action-create-agent",
         });
       }
@@ -145,7 +141,6 @@ export function useChannelIntro({
     onBrowseChannels,
     onCreateChannel,
     onOpenMembers,
-    onWelcomeAddAgent,
     projectHome,
   ]);
 }
